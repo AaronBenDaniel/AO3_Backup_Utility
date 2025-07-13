@@ -92,28 +92,7 @@ for work in works:
         remove(work_path)
         works_to_download.append(work)
         continue
-
-
-# Download works
-# for work in works_to_download:
-#     print(f"Downloading: {work.title}")
-
-#     fandom = ascii_only(work.fandoms[0]) if work.fandoms else "Other"
-#     series = work.series[0] if work.series else None
-
-#     work_path = output_directory / fandom
-
-#     if series:
-#         work_path = work_path / ascii_only(series.name)
-
-#     work_path = work_path / (ascii_only(work.title).replace(" ", "_") + ".epub")
-
-#     # Make parent directories
-#     work_path.parent.mkdir(parents=True, exist_ok=True)
-
-#     # Download fic
-#     with open(work_path, "wb") as file:
-#         file.write(work.download("EPUB"))
+    
 
 # Download works (threaded)
 # Batches threads to avoid ratelimits
