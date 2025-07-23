@@ -14,7 +14,7 @@ output_directory = Path(environ.get("OUTPUT_DIRECTORY"))
 def ascii_only(string: str):
     string = string.replace(" ", "_")
     return sub(
-        r"[^qwertyuiopasdfghjklzxcvbnmQWERTYUIOPASDFGHJKLZXCVBNM1234567890\-\_)(!`~.><?\[\]{}]",
+        r"[^qwertyuiopasdfghjklzxcvbnmQWERTYUIOPASDFGHJKLZXCVBNM1234567890\-\_)(`~.><\[\]{}]",
         "",
         string,
     )
