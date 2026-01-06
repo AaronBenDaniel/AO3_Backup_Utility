@@ -6,9 +6,24 @@ from os import environ, remove
 from pathlib import Path
 from re import search, sub
 from math import ceil
+from tqdm import tqdm
+import warnings
+from eliot import start_action, to_file, Message
+import threading
+
+path = Path(__file__).parent.resolve()
+warnings.filterwarnings("ignore")
+to_file(open(path / "log.debug", "w"))
 
 load_dotenv()
-output_directory = Path(environ.get("OUTPUT_DIRECTORY"))
+
+
+def thread_exception_handler(args):
+    args.thread.action.finish(args.exc_value)
+
+
+# Set global thread exception handler
+threading.excepthook = thread_exception_handler
 
 
 def ascii_only(string: str):
@@ -20,106 +35,189 @@ def ascii_only(string: str):
     )
 
 
-print("Initializing session")
-session = Session(environ.get("USERNAME"), environ.get("PASSWORD"))
-
-# Get subs list
-subs = session.get_subscriptions(use_threading=True)
-
-# Remove all non-works
-works = [sub for sub in subs if isinstance(sub, Work)]
-
-# Load metadata for works (threaded)
-# Batches threads to avoid ratelimits
-n = 10
-for i in range(0, len(works), n):
-    print(f"Reloading batch: {ceil(i/n)+1}/{ceil(len(works)/n)}")
-
-    works_to_reload = works[i : i + n]
-
-    threads = []
-    for work in works_to_reload:
-        work.set_session(session)
-        threads.append(work.reload(threaded=True, load_chapters=False))
-    for thread in threads:
-        thread.join()
-
-
-# Remove works that do not need to be downloaded (word-count and modify-date unchanged)
-print("Parsing works")
-works_to_download = []
-for work in works:
-
-    fandom = ascii_only(work.fandoms[0]) if work.fandoms else "Other"
-    series = work.series[0] if work.series else None
-
-    work_path = output_directory / fandom
-
-    if series:
-        work_path = work_path / ascii_only(series.name)
-
-    work_path = work_path / (ascii_only(work.title).replace(" ", "_") + ".epub")
-
-    if not work_path.exists():
-        print(f"Path does not exist: {work_path}")
-        works_to_download.append(work)
-        continue
-
-    # Open existing .epub file
+if __name__ == "__main__":
     try:
-        epub_file = epub.read_epub(work_path)
-    except epub.EpubException:
-        remove(work_path)
-        works_to_download.append(work)
-        continue
+        username = environ.get("USERNAME")
+        password = environ.get("PASSWORD")
+        output_directory = Path(environ.get("OUTPUT_DIRECTORY"))
+    except TypeError:
+        print("Missing environment parameter")
+        exit()
 
-    # Extract all chapters
-    chapters = [chapter for chapter in epub_file.get_items_of_type(ITEM_DOCUMENT)]
+    Message.log(output_directory=output_directory)
 
-    # Parse the first chapter (Always the Preface)
-    soup = BeautifulSoup(chapters[0].get_body_content(), features="lxml")
+    # Log in
+    with start_action(action_type="Log In", username=username, password=password):
+        print("Initializing session")
+        session = Session(username, password)
+        with open(path / "loginPage.debug", "w", encoding="utf-8") as file:
+            file.write(str(session.loginPage))
+        print(f"Logged in as {session.username}")
+        Message.log(username=f"{session.username}")
 
-    # Extract important chunk of metadata
-    metadata = str(soup.find_all("dd")[-1])
+    # Get subs list
+    with start_action(action_type="Get Subs"):
+        print("Retrieving subscriptions")
+        subs = session.get_subscriptions(use_threading=True)
 
-    # Extract word count
-    epub_wc = int(search(r"Words:\s*([\d,]+)", metadata).group(1).replace(",", ""))
+    # Remove all non-works
+    works = [sub for sub in subs if isinstance(sub, Work)]
 
-    ao3_wc = work.words
+    # Load metadata for works (threaded)
+    # Batches threads to avoid ratelimits
+    n = 10
+    with tqdm(total=len(works), desc="Reloading Works") as pbar:
+        for i in range(0, len(works), n):
+            with start_action(
+                action_type="Reload Works Batch",
+                data=f"{ceil(i/n)+1}/{ceil(len(works)/n)}",
+            ):
+                works_to_reload = works[i : i + n]
 
-    if epub_wc != ao3_wc:
-        print(f"EPUB out of date: {work_path}")
-        remove(work_path)
-        works_to_download.append(work)
-        continue
-    
+                threads = []
+                for work in works_to_reload:
+                    work.set_session(session)
+                    thread = work.reload(threaded=True, load_chapters=False)
+                    thread.action = start_action(
+                        action_type="Reload Work",
+                        work_id=work.id,
+                    )
+                    threads.append(thread)
+                for thread in threads:
+                    thread.join()
+                    pbar.update(1)
+                    thread.action.finish()
 
-# Download works (threaded)
-# Batches threads to avoid ratelimits
-n = 10
-for i in range(0, len(works_to_download), n):
-    print(f"Downloading batch: {ceil(i/n)+1}/{ceil(len(works_to_download)/n)}")
+    # Remove works that do not need to be downloaded (word-count and modify-date unchanged)
+    with tqdm(total=len(works), desc="Parsing Works") as pbar:
+        works_to_download = []
+        for work in works:
+            action = start_action(action_type="Parse Work", work_id=work.id)
 
-    works = works_to_download[i : i + n]
-    threads = []
-    for work in works:
+            fandom = ascii_only(work.fandoms[0]) if work.fandoms else "Other"
+            series = work.series[0] if work.series else None
 
-        print(f"Downloading: {work.title}")
+            work_path = output_directory / fandom
 
-        fandom = ascii_only(work.fandoms[0]) if work.fandoms else "Other"
-        series = work.series[0] if work.series else None
+            if series:
+                work_path = work_path / ascii_only(series.name)
 
-        work_path = output_directory / fandom
+            work_path = work_path / (ascii_only(work.title).replace(" ", "_") + ".epub")
 
-        if series:
-            work_path = work_path / ascii_only(series.name)
+            if not work_path.exists():
+                works_to_download.append(work)
+                pbar.update(1)
+                Message.log(
+                    task_uuid=action._identification["task_uuid"],
+                    action_type=action._identification["action_type"],
+                    outcome="Path does not exist",
+                    work_path=work_path,
+                    work_id=work.id,
+                )
+                action.finish()
+                continue
 
-        work_path = work_path / (ascii_only(work.title).replace(" ", "_") + ".epub")
+            # Open existing .epub file
+            try:
+                epub_file = epub.read_epub(work_path)
+            except epub.EpubException:
+                remove(work_path)
+                works_to_download.append(work)
+                pbar.update(1)
+                Message.log(
+                    task_uuid=action._identification["task_uuid"],
+                    action_type=action._identification["action_type"],
+                    outcome="Invalid EPUB",
+                    work_path=work_path,
+                    work_id=work.id,
+                )
+                action.finish()
+                continue
 
-        # Make parent directories
-        work_path.parent.mkdir(parents=True, exist_ok=True)
+            # Extract all chapters
+            chapters = [
+                chapter for chapter in epub_file.get_items_of_type(ITEM_DOCUMENT)
+            ]
 
-        work.set_session(session)
-        threads.append(work.download_to_file(work_path, "EPUB", threaded=True))
-    for thread in threads:
-        thread.join()
+            # Parse the first chapter (Always the Preface)
+            soup = BeautifulSoup(chapters[0].get_body_content(), features="lxml")
+
+            # Extract important chunk of metadata
+            metadata = str(soup.find_all("dd")[-1])
+
+            # Extract word count
+            epub_wc = int(
+                search(r"Words:\s*([\d,]+)", metadata).group(1).replace(",", "")
+            )
+
+            ao3_wc = work.words
+
+            if epub_wc != ao3_wc:
+                remove(work_path)
+                works_to_download.append(work)
+                pbar.update(1)
+                Message.log(
+                    task_uuid=action._identification["task_uuid"],
+                    action_type=action._identification["action_type"],
+                    outcome="EPUB out of date",
+                    work_path=work_path,
+                    work_id=work.id,
+                )
+                action.finish()
+                continue
+
+            pbar.update(1)
+            Message.log(
+                task_uuid=action._identification["task_uuid"],
+                action_type=action._identification["action_type"],
+                outcome="EPUB up to date",
+                work_path=work_path,
+                work_id=work.id,
+            )
+            action.finish()
+
+    # Download works (threaded)
+    # Batches threads to avoid ratelimits
+    n = 10
+    with tqdm(total=len(works_to_download), desc="Downloading Works") as pbar:
+        for i in range(0, len(works_to_download), n):
+            with start_action(
+                action_type="Download Works Batch",
+                data=f"{ceil(i/n)+1}/{ceil(len(works_to_download)/n)}",
+            ):
+                works = works_to_download[i : i + n]
+                threads = []
+                for work in works:
+
+                    pbar.set_postfix_str(work.title)
+
+                    fandom = ascii_only(work.fandoms[0]) if work.fandoms else "Other"
+                    series = work.series[0] if work.series else None
+
+                    work_path = output_directory / fandom
+
+                    if series:
+                        work_path = work_path / ascii_only(series.name)
+
+                    work_path = work_path / (
+                        ascii_only(work.title).replace(" ", "_") + ".epub"
+                    )
+
+                    # Make parent directories
+                    work_path.parent.mkdir(parents=True, exist_ok=True)
+
+                    work.set_session(session)
+                    threads.append(
+                        [
+                            work.download_to_file(work_path, "EPUB", threaded=True),
+                            start_action(
+                                action_type="Download Work",
+                                work_id=work.id,
+                                work_path=work_path,
+                            ),
+                        ]
+                    )
+                for thread, action in threads:
+                    thread.join()
+                    pbar.update(1)
+                    action.finish()
