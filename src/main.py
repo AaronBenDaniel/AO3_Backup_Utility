@@ -13,7 +13,8 @@ import threading
 
 path = Path(__file__).parent.resolve()
 warnings.filterwarnings("ignore")
-to_file(open(path / "log.debug", "w"))
+logging_path = path / "log.debug"
+to_file(open(logging_path, "w"))
 
 load_dotenv()
 
@@ -44,7 +45,8 @@ if __name__ == "__main__":
         print("Missing environment parameter")
         exit()
 
-    Message.log(output_directory=output_directory)
+    Message.log(output_directory=output_directory, logging_path=logging_path)
+    print(f"Output Directory: {output_directory}\nLogging Path: {logging_path}")
 
     # Log in
     with start_action(action_type="Log In", username=username, password=password):
