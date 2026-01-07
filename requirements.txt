@@ -1,4 +1,4 @@
-ao3-api @ git+https://github.com/AaronBenDaniel/ao3_api@02e349985d927bd8693f905f440e1ef0539f1984
+ao3-api @ git+https://github.com/AaronBenDaniel/ao3_api@d240c750efc5afd3e8414a7f759223658924b00e
 beautifulsoup4==4.13.4
 boltons==25.0.0
 certifi==2025.7.9
