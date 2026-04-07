@@ -242,7 +242,7 @@ if __name__ == "__main__":
                     pbar.update(1)
                     thread.action.finish(exception=thread.exception)
                     if thread.exception:
-                        failures = append(thread.work_id)
+                        failures.append(thread.work_id)
 
         # Move works from temp directory to output directory
         for work in works_to_download:
