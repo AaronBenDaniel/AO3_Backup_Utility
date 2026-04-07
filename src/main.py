@@ -82,11 +82,14 @@ if __name__ == "__main__":
     with start_task(action_type="Get Subs"):
         print("Retrieving subscriptions")
         subs = session.get_subscriptions(use_threading=True)
-        if getattr(session,"exceptions",None):
+        if getattr(session, "exceptions", None):
             Message.log(num_sub_page_failures=str(len(session.exceptions)))
 
     # Remove all non-works
-    works = [sub for sub in subs if isinstance(sub, Work)]
+    works = []
+    for sub in subs:
+        if isinstance(sub, Work) and sub not in works:
+            works.append(sub)
 
     failures = []
 
