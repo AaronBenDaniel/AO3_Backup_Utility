@@ -69,6 +69,11 @@ if __name__ == "__main__":
     Message.log(output_directory=output_directory, logging_path=logging_path)
     print(f"Output Directory: {output_directory}\nLogging Path: {logging_path}")
 
+    if not output_directory.exists() or not output_directory.is_dir():
+        Message.log(error="Output path does not exist or is not a directory")
+        print("Output path does not exist or is not a directory")
+        exit()
+
     # Log in
     with start_task(action_type="Log In", username=username, password=password):
         print("Initializing session")
