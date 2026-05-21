@@ -17,14 +17,15 @@ from AO3 import Session, Work
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 from ebooklib import epub, ITEM_DOCUMENT
-from os import environ, replace, removedirs
+from os import environ, replace
 from pathlib import Path
-from re import search, sub
 from math import ceil
 from tqdm import tqdm
+from shutil import rmtree
 import warnings
 from eliot import to_file, Message, start_task
 import threading
+import re
 
 path = Path(__file__).parent.parent.resolve()
 warnings.filterwarnings("ignore")
@@ -35,8 +36,8 @@ load_dotenv()
 
 
 def ascii_only(string: str):
-    string = string.replace(" ", "_")
-    return sub(
+    string = str(string).replace(" ", "_")
+    return re.sub(
         r"[^qwertyuiopasdfghjklzxcvbnmQWERTYUIOPASDFGHJKLZXCVBNM1234567890\-\_)(`~.><\[\]{}]",
         "",
         string,
@@ -58,6 +59,8 @@ def get_path(work: Work):
 
 
 if __name__ == "__main__":
+    rmtree(path / "temp", ignore_errors=True)
+
     try:
         username = environ.get("USERNAME")
         password = environ.get("PASSWORD")
@@ -92,9 +95,9 @@ if __name__ == "__main__":
 
     # Remove all non-works
     works = []
-    for sub in subs:
-        if isinstance(sub, Work) and sub not in works:
-            works.append(sub)
+    for item in subs:
+        if isinstance(item, Work) and item not in works:
+            works.append(item)
 
     failures = []
 
@@ -132,6 +135,7 @@ if __name__ == "__main__":
 
     # Remove works that do not need to be downloaded (word-count and modify-date unchanged)
     with tqdm(total=len(works), desc="Parsing Works") as pbar:
+        Path(path / "temp").mkdir()
         works_to_download = []
         for work in works:
             if work.id in failures:
@@ -182,7 +186,7 @@ if __name__ == "__main__":
 
             # Extract word count
             epub_wc = int(
-                search(r"Words:\s*([\d,]+)", metadata).group(1).replace(",", "")
+                re.search(r"Words:\s*([\d,]+)", metadata).group(1).replace(",", "")
             )
 
             ao3_wc = work.words
@@ -214,7 +218,6 @@ if __name__ == "__main__":
     # Batches threads to avoid ratelimits
     n = 10
     with tqdm(total=len(works_to_download), desc="Downloading Works") as pbar:
-        Path(path / "temp").mkdir(exist_ok=True)
         for i in range(0, len(works_to_download), n):
             with start_task(
                 action_type="Download Works Batch",
@@ -260,6 +263,6 @@ if __name__ == "__main__":
             work_path.parent.mkdir(parents=True, exist_ok=True)
             replace(path / "temp" / (str(work.id) + ".tmp"), work_path)
 
-    removedirs(path / "temp")
+    rmtree(path / "temp", ignore_errors=True)
     print(f"Completed with {len(failures)} failures")
     Message.log(num_failures=len(failures), failures=failures)
